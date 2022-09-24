@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset='utf-8' />
+    <title></title>
+
+    <link rel="stylesheet" type="text/css" href="/fullcalendar/fullcalendar-3.0.1.min.css">
+    <link rel="stylesheet" type="text/css" href="/fullcalendar/bootstrap-3.3.7.min.css">
+    <link rel="stylesheet" type="text/css" href="/fullcalendar/bootstrap-datetimepicker-4.17.42.min.css">
+    <link rel="stylesheet" type="text/css" href="/fullcalendar/fullcalendar.css">
+    <script src="/fullcalendar/jquery.js"></script>
+    <script type="text/javascript" src="/fullcalendar/moment-with-locales-2.15.1.min.js"></script>
+    <script type="text/javascript" src="/fullcalendar/moment-ko.js"></script>
+    <script src="/fullcalendar/fullcalendar.js"></script>
+    <script type="text/javascript" src="/fullcalendar/bootstrap-3.3.7.min.js"></script>
+    <script type="text/javascript" src="/fullcalendar/bootstrap-datetimepicker-4.17.42.min.js"></script>
+
+</head>
+
+    <script>
+        let $calendar;
+
+
+        $(function(){
+            const $modal = $('.modal');
+            $modal.on('hidden.bs.modal', modalClose);
+
+            const searchDate = {
+                searchDate: formatUTCToKoreanTime(new Date().toISOString()).substring(0, 8)
+            };
+
+            const request = ajaxCall("/", searchDate);
+
+            request.done(function(data) {
+                $calendar = new FullCalendar.Calendar(document.getElementById('calendar'), {
+                    initialView: 'dayGridMonth',
+                    headerToolbar: {
+                        left: '',
+                        center: 'title',
+                    },
+                    editable: true,
+                    dayMaxEvents: true,
+                    locale: 'ko',
+                    events: data,
+
+                    /**
+                     * 일정 추가 모달 show
+                     */
+                    dateClick: function() {
+                        $modal.modal('show');
+                        $modal.find('#title').val();
+                        $modal.find('#start').val();
+
+                        $('#save-calendar').off().on('click', function () {
+                            const title = $('#title').val();
+
+                            if (title) {
+                                const obj = {
+                                    id: $('#id').val(),
+                                    title: title,
+                                    start: $('#start').val(),
+                                };
+                                ajaxCall("/create", obj, calendarAddCallback);
+                            }
+
+                            modalClose();
+                        });
+                    },
+
+                    /**
+                     * eventDrop 시작, 종료 일자 변경
+                     * @param info
+                     */
+                    eventDrop: function (info){
+                        const obj = {
+                            id: info.event.id,
+                            title: info.event._def.title,
+                            start: info.event._instance.range.start,
+                        };
+
+                        ajaxCall("/update/drop", obj);
+                    },
+                    
+                    /**
+                     * eventResize 시작 또는 종료 일자 변경
+                     * @param info
+                     */
+                    eventResize: function (info){
+                        const obj = {
+                            id: info.event.id,
+                            title: info.event._def.title,
+                            start: info.event._instance.range.start,
+                        };
+
+                        ajaxCall("/update/resize", obj);
+                    },
+                    
+                    /**
+                     * eventClick 타이틀 수정 또는 삭제
+                     * @param info
+                     */
+                    eventClick: function(info) {
+                        const $delete = $('#delete-calendar');
+                        $delete.show();
+                        $modal.modal('show');
+
+
+                        let id = info.event.id;
+                        let title = info.event._def.title;
+                        let start = formatDate(info.event._instance.range.start);
+
+                        $modal.find('#title').val(title);
+                        $modal.find('#start').val(start);
+
+
+                        /**
+                         * 업데이트
+                         */
+                        $('#save-calendar').off().on('click', function() {
+                            const obj = ({
+                                "id": id,
+                                "title": $('#title').val(),
+                                "start": $('#start').val(),
+                            })
+
+                            ajaxCall("/update/resize", obj);
+                            $calendar.addEvent({
+                                id: id,
+                                title: obj.title,
+                                start: obj.start
+                            });
+
+                            info.event.remove();
+                            modalClose();
+                        })
+
+                        /**
+                         * 삭제
+                         */
+                        $delete.on('click', function() {
+                            ajaxCall("/delete", {id});
+                            info.event.remove();
+                            modalClose();
+                        })
+
+                    },
+
+                });
+
+
+                $("#start").datetimepicker({
+                    format: 'YYYY-MM-DD HH:mm'
+                });
+
+
+                $calendar.render();
+            });
+
+            request.fail(function( jqXHR, textStatus ) {
+                alert("fail: " + textStatus);
+            });
+        });
+
+        /**
+         * Modal 종료 이벤트
+         */
+        function modalClose() {
+            let $modal = $(".modal");
+            $modal.find('input').val('');
+            $modal.modal('hide');
+            $('#delete-calendar').hide();
+        }
+
+        /**
+         * YYYY-MM-DD 변환
+         * @param date
+         * @returns {string}
+         */
+        function formatDate(date) {
+            return date.toISOString().substring(0,16).replace("T"," ");
+        }
+
+        /**
+         * 일정 추가
+         */
+        function createCalendar() {
+            const title = $('#title').val();
+
+            if (title) {
+                const obj = {
+                    id: $('#id').val(),
+                    title: title,
+                    start: $('#start').val(),
+                };
+                ajaxCall("/create", obj, calendarAddCallback);
+            }
+        }
+
+
+        /**
+         * UTC 시간 -> 대한민국 시간 변환
+         * @param dateString
+         * @returns {string}
+         */
+        function formatUTCToKoreanTime(dateString) {
+            const date = new Date(dateString);
+            const offset = date.getTimezoneOffset() * 60000;
+            return new Date(date.getTime() - offset).toISOString();
+        }
+
+        /**
+         * 종료일 기준이 00시 00분 이기 때문에 종료일 하루 전에서 막대가 끝이 나기 때문에
+         * 화면 출력 시 하루 더하기 Formatter
+         * @param endDate
+         * @returns {string}
+         */
+        function dateOnePrintFormatter(endDate) {
+            let date = new Date(endDate);
+            date.setDate(date.getDate() + 1);
+            endDate = date.toISOString().substring(0, 10);
+
+            return endDate;
+        }
+
+        /**
+         * 종료일 기준이 00시 00분 이기 때문에 종료일 하루 전에서 막대가 끝이 나기 때문에
+         * 화면 출력 시 하루 더하기 Formatter
+         * @param data
+         * @returns {string}
+         */
+        function datePrintFormatter(data) {
+            for (let i = 0; i < data.length; i++) {
+                const date = new Date(data[i].end);
+                date.setDate(date.getDate() + 1);
+                data[i].end = date.toISOString().substring(0, 10);
+            }
+
+            return data;
+        }
+
+
+        /**
+         * 종료일 기준이 00시 00분 이기 때문에 종료일 하루 전에서 막대가 끝이 나기 때문에
+         * 데이터 저장 시 하루 빼기 Formatter
+         * @param endDate
+         * @returns {string}
+         */
+        function dateSaveFormatter(endDate) {
+            const date = new Date(endDate);
+            date.setDate(date.getDate() - 1);
+            return date.toISOString().substring(0, 10);
+        }
+
+        /**
+         * Ajax 공통
+         * @param url
+         * @param obj
+         * @param successCallback
+         */
+        function ajaxCall(url, obj, successCallback) {
+            return $.ajax({
+                        url: url,
+                        type: "POST",
+                        contentType: "application/json;charset=UTF-8",
+                        data: JSON.stringify(obj)
+                    }).done(function(data) {
+                        if (successCallback) successCallback(data);
+                    }).fail(function(e) {
+                        alert("Fail"+e);
+                    });
+        }
+
+
+        /**
+         * 캘린더 추가 Callback 이벤트
+         * @param data
+         */
+        function calendarAddCallback(data) {
+            $calendar.addEvent({
+                id: data.id,
+                title: data.title,
+                start: data.start,
+            })
+        }
+
+    </script>
+<body>
+
+<div id='calendar'></div>
+
+<div id='datepicker'></div>
+
+<div class="modal fade" tabindex="-1" role="dialog">
+    <div class="modal-dialog" role="document">
+        <div class="modal-content">
+            <div class="modal-header">
+                <button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true">&times;</span></button>
+                <h4 class="modal-title">캘린더 추가</h4>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="id">
+                <div class="row">
+                    <div class="col-xs-12">
+                        <label class="col-xs-4" for="title">내용</label>
+                        <input type="text" name="title" id="title" />
+                    </div>
+                </div>
+                <div class="row">
+                    <div class="col-xs-12">
+                        <label class="col-xs-4" for="start">일정</label>
+                        <input type="text" name="start" id="start" />
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-default" data-dismiss="modal">닫기</button>
+                <button type="button" class="btn btn-danger" id="delete-calendar" style="display: none">삭제</button>
+                <button type="button" class="btn btn-primary" id="save-calendar">저장</button>
+            </div>
+        </div><!-- /.modal-content -->
+    </div><!-- /.modal-dialog -->
+</div><!-- /.modal -->
+
+</body>
+</html>
